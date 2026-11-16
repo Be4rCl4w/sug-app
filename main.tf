@@ -162,6 +162,8 @@ resource "azurerm_linux_web_app" "webapp" {
     application_stack {
       node_version = "24-lts"
     }
+    # Serve plain HTML files from /home/site/wwwroot on port 80
+    app_command_line = "pm2 serve /home/site/wwwroot 80 --no-daemon --spa"
   }
 
   https_only                                     = false
@@ -174,11 +176,12 @@ resource "azurerm_linux_web_app" "webapp" {
     type = "SystemAssigned"
   }
   app_settings = {
-    "SCM_DO_BUILD_DURING_DEPLOYMENT"             = "true"
+    "SCM_DO_BUILD_DURING_DEPLOYMENT"             = "false"
     "ApplicationInsightsAgent_EXTENSION_VERSION" = "~3"
     "APPLICATIONINSIGHTS_CONNECTION_STRING"      = azurerm_application_insights.appi.connection_string
     "API_BASE_URL"                               = "http://10.20.1.10"
   }
+  
 
   logs {
     detailed_error_messages = true
