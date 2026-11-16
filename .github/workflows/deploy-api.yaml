@@ -1,0 +1,46 @@
+name: Deploy API Tier to VMSS
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'api/**'
+      - '.github/workflows/deploy-api.yml'
+
+jobs:
+  deploy-api-vmss:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy and Restart API on all VMSS Instances
+        run: |
+          az vmss run-command invoke \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --name "${{ secrets.AZURE_VMSS_NAME }}" \
+            --command-id RunShellScript \
+            --scripts "
+              mkdir -p /var/www/unn-sug-api && cd /var/www/unn-sug-api
+              # Pull latest api directory from GitHub (or download artifact from Azure Blob)
+              rm -rf repo_tmp && git clone --depth 1 https://github.com/${{ github.repository }}.git repo_tmp
+              cp -r repo_tmp/api/* /var/www/unn-sug-api/
+              rm -rf repo_tmp
+
+              # Write environment variables
+              cat <<EOF > /var/www/unn-sug-api/.env
+          PORT=3000
+          DB_SERVER=${{ secrets.DB_SERVER }}
+          DB_NAME=${{ secrets.DB_NAME }}
+          EOF
+
+              # Install dependencies & reload zero-downtime via PM2
+              npm install --production
+              pm2 reload unn-sug-api || pm2 start server.js --name unn-sug-api
+              pm2 save
+            "
