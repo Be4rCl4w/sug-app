@@ -5,7 +5,7 @@ on:
     branches: [ main ]
     paths:
       - 'api/**'
-      - '.github/workflows/deploy-api.yml'
+      - '.github/workflows/deploy-api.yaml'
   workflow_dispatch:
 
 permissions:
@@ -28,26 +28,35 @@ jobs:
 
       - name: Deploy and Restart API on all VMSS Instances
         run: |
-          az vmss run-command invoke \
+          # 1. Fetch all active instance IDs in the VMSS
+          INSTANCE_IDS=$(az vmss list-instances \
             --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
             --name "demo-vmss" \
-            --command-id RunShellScript \
-            --scripts "
-              mkdir -p /var/www/unn-sug-api && cd /var/www/unn-sug-api
-              # Pull latest api directory from GitHub (or download artifact from Azure Blob)
-              rm -rf repo_tmp && git clone --depth 1 https://github.com/${{ github.repository }}.git repo_tmp
-              cp -r repo_tmp/api/* /var/www/unn-sug-api/
-              rm -rf repo_tmp
+            --query "[].instanceId" -o tsv)
+         
+          # 2. Loop through each instance and run the deployment script
+          for ID in $INSTANCE_IDS; do
+          echo "Deploying to VMSS instance: $ID"
+            az vmss run-command invoke \
+              --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+              --name "demo-vmss" \
+              --command-id RunShellScript \
+              --scripts "
+                mkdir -p /var/www/unn-sug-api && cd /var/www/unn-sug-api
+                # Pull latest api directory from GitHub (or download artifact from Azure Blob)
+                rm -rf repo_tmp && git clone --depth 1 https://github.com/${{ github.repository }}.git repo_tmp
+                cp -r repo_tmp/api/* /var/www/unn-sug-api/
+                rm -rf repo_tmp
 
-              # Write environment variables
-              cat <<EOF > /var/www/unn-sug-api/.env
+                # Write environment variables
+                cat <<EOF > /var/www/unn-sug-api/.env
           PORT=3000
           DB_SERVER=${{ secrets.DB_SERVER }}
           DB_NAME=${{ secrets.DB_NAME }}
           EOF
 
-              # Install dependencies & reload zero-downtime via PM2
-              npm install --production
-              pm2 reload unn-sug-api || pm2 start server.js --name unn-sug-api
-              pm2 save
-            "
+                # Install dependencies & reload zero-downtime via PM2
+                npm install --production
+                pm2 reload unn-sug-api || pm2 start server.js --name unn-sug-api
+                pm2 save
+              "
