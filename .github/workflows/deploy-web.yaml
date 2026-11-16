@@ -5,7 +5,7 @@ on:
     branches: [ main ]
     paths:
       - 'web/**'
-      - '.github/workflows/deploy-web.yml'
+      - '.github/workflows/deploy-web.yaml'
   workflow_dispatch:
 
 permissions:
