@@ -40,6 +40,7 @@ jobs:
             az vmss run-command invoke \
               --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
               --name "demo-vmss" \
+              --instance-id "$ID" \
               --command-id RunShellScript \
               --scripts "
                 mkdir -p /var/www/unn-sug-api && cd /var/www/unn-sug-api
@@ -60,3 +61,4 @@ jobs:
                 pm2 reload unn-sug-api || pm2 start server.js --name unn-sug-api
                 pm2 save
               "
+          done
