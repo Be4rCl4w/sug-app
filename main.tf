@@ -164,7 +164,7 @@ resource "azurerm_linux_web_app" "webapp" {
     }
   }
 
-  https_only                                     = true
+  https_only                                     = false
   public_network_access_enabled                  = true
   virtual_network_subnet_id                      = azurerm_subnet.Spoke_vnet_subnets["WebSubnet"].id
   ftp_publish_basic_authentication_enabled       = false
@@ -717,7 +717,7 @@ resource "azurerm_nat_gateway_public_ip_association" "nat_ip_assoc" {
 }
 
 # 4. Associate NAT Gateway with your Subnet
-resource "azurerm_subnet_nat_gateway_association " subnet_nat_ass" {
+resource "azurerm_subnet_nat_gateway_association" "subnet_nat_ass" {
   subnet_id      = azurerm_subnet.Spoke_vnet_subnets["AppSubnet"].id
   nat_gateway_id = azurerm_nat_gateway.nat_gateway.id
 }
