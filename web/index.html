@@ -59,7 +59,7 @@
 
     <script>
         // Update this URL to point to your VMSS Load Balancer / API Gateway endpoint
-        const API_BASE_URL = window.location.hostname === 'localhost' ? 'http://localhost:3000/api' : 'http://10.20.1.10/api';
+        const API_BASE_URL = window.location.hostname === 'localhost' ? 'http://localhost:3000/api' : 'https://<YOUR-VMSS-LB-DNS-OR-IP>/api';
 
         function switchTab(tab) {
             if (tab === 'vote') {
