@@ -163,7 +163,7 @@ resource "azurerm_linux_web_app" "webapp" {
       node_version = "24-lts"
     }
     # Serve plain HTML files from /home/site/wwwroot on port 8080
-    app_command_line = "sh -c \"echo \\\"window.API_BASE_URL='$API_BASE_URL';\\\" > /home/site/wwwroot/config.js && pm2 serve /home/site/wwwroot --no-daemon\""
+   app_command_line  = "sh /home/site/wwwroot/startup.sh"
   }
 
   https_only                                     = false
