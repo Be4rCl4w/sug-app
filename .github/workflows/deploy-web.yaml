@@ -22,6 +22,9 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api   # <-- Runs npm commands inside /api
     steps:
       - uses: actions/checkout@v4
 
@@ -29,12 +32,14 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
+          cache-dependency-path: 'api/package-lock.json'
 
       - name: Install dependencies
         run: npm ci
 
       - name: Run tests
         run: npm test
+
 
   # ------------------------------------------------------------------
   # 2. Web tier -> Azure App Service (static index.html)
