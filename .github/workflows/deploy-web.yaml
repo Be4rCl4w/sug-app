@@ -2,26 +2,49 @@ name: Deploy Web Tier to Linux App Service
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
       - 'web/**'
       - '.github/workflows/deploy-web.yaml'
   workflow_dispatch:
 
 permissions:
-  id-token: write
   contents: read
+  id-token: write
+
+env:
+  NODE_VERSION: '24'
 
 jobs:
-  build-and-deploy-web:
+  # ------------------------------------------------------------------
+  # 1. Run the test suite on every push before anything deploys
+  # ------------------------------------------------------------------
+  test:
+    name: Test
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Inject Production API URL
-        run: |
-          sed -i "s|https://<YOUR-VMSS-LB-DNS-OR-IP>/api|${{ secrets.API_URL }}|g" web/index.html
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+  # ------------------------------------------------------------------
+  # 2. Web tier -> Azure App Service (static index.html)
+  # ------------------------------------------------------------------
+  deploy-web:
+    name: Deploy Web Tier
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Azure login (OIDC)
         uses: azure/login@v2
@@ -30,8 +53,13 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Deploy to Azure Web App
+      - name: Deploy to App Service
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
-          package: ./web
+          package: './web'
+
+      - name: Smoke test web tier
+        run: |
+          sleep 15  # allow app to restart and come up
+          curl -fsSL "http://${{ secrets.AZURE_WEBAPP_NAME }}.azurewebsites.net/" | grep -q "UNN SUG"

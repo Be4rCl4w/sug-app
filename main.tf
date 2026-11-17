@@ -162,8 +162,8 @@ resource "azurerm_linux_web_app" "webapp" {
     application_stack {
       node_version = "24-lts"
     }
-    # Serve plain HTML files from /home/site/wwwroot on port 80
-    app_command_line = "pm2 serve /home/site/wwwroot 80 --no-daemon --spa"
+    # Serve plain HTML files from /home/site/wwwroot on port 8080
+    app_command_line = "sh -c \"echo \\\"window.API_BASE_URL='$API_BASE_URL';\\\" > /home/site/wwwroot/config.js && pm2 serve /home/site/wwwroot --no-daemon --spa\""
   }
 
   https_only                                     = false
@@ -179,7 +179,7 @@ resource "azurerm_linux_web_app" "webapp" {
     "SCM_DO_BUILD_DURING_DEPLOYMENT"             = "false"
     "ApplicationInsightsAgent_EXTENSION_VERSION" = "~3"
     "APPLICATIONINSIGHTS_CONNECTION_STRING"      = azurerm_application_insights.appi.connection_string
-    "API_BASE_URL"                               = "http://10.20.1.10"
+    "API_BASE_URL"                               = "http://${azurerm_public_ip.lb_public_ip.ip_address}/api"
   }
   
 
@@ -194,29 +194,14 @@ resource "azurerm_linux_web_app" "webapp" {
       }
     }
   }
-
-  lifecycle {
-    ignore_changes = [
-      app_settings["WEBSITE_RUN_FROM_PACKAGE"],
-    ]
-  }
 }
 
-data "template_file" "vmss_bootstrap" {
-  template = <<-EOF
-              #!/bin/bash
-              # Update and install Node.js 24.x, Git, and PM2
-              curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
-              sudo apt-get install -y nodejs git
-              sudo npm install -g pm2
-
-              # Prepare app directory structure
-              mkdir -p /var/www/unn-sug-api
-              chown -R root:root /var/www/unn-sug-api
-
-              # Configure PM2 startup hook
-              pm2 startup systemd -u root --hp /root
-              EOF
+resource "azurerm_public_ip" "lb_public_ip" {
+  name                = "my-lb-public-ip"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  allocation_method   = "Static"
+  sku                 = "Standard"
 }
 
 resource "azurerm_lb" "lb" {
@@ -228,8 +213,7 @@ resource "azurerm_lb" "lb" {
   frontend_ip_configuration {
     name                          = "private-frontend"
     subnet_id                     = azurerm_subnet.Spoke_vnet_subnets["AppSubnet"].id
-    private_ip_address_allocation = "Static"
-    private_ip_address            = "10.20.1.10"
+    public_ip_address_id          = azurerm_public_ip.lb_public_ip.id
   }
 }
 
@@ -242,8 +226,8 @@ resource "azurerm_lb_probe" "http" {
   name                = "http-probe"
   loadbalancer_id     = azurerm_lb.lb.id
   protocol            = "Http"
-  port                = 80
-  request_path        = "/"
+  port                = 3000
+  request_path        = "/api/health"
   interval_in_seconds = 5
   number_of_probes    = 2
 }
@@ -252,8 +236,8 @@ resource "azurerm_lb_rule" "http" {
   name                           = "http-rule"
   loadbalancer_id                = azurerm_lb.lb.id
   protocol                       = "Tcp"
-  frontend_port                  = 80
-  backend_port                   = 80
+  frontend_port                  = 3000
+  backend_port                   = 3000
   frontend_ip_configuration_name = "private-frontend"
   backend_address_pool_ids       = [azurerm_lb_backend_address_pool.pool.id]
   probe_id                       = azurerm_lb_probe.http.id
@@ -313,7 +297,8 @@ resource "azurerm_linux_virtual_machine_scale_set" "vmss" {
     }
   }
 
-  user_data = base64encode(data.template_file.vmss_bootstrap.rendered)
+ # Read and Base64-encode your cloud-init.yml file
+  custom_data = filebase64("${path.module}/cloud-init.yml")
 
   depends_on = [
     azurerm_lb_rule.http
@@ -472,7 +457,7 @@ resource "azurerm_network_security_group" "web" {
     access                       = "Allow"
     protocol                     = "Tcp"
     source_port_range            = "*"
-    destination_port_range       = "80"
+    destination_port_ranges       = ["80", "8080"]
     source_address_prefix        = "Internet"
     destination_address_prefixes = azurerm_subnet.Spoke_vnet_subnets["WebSubnet"].address_prefixes
     description                  = "HTTP from App Gateway subnet"
@@ -498,7 +483,7 @@ resource "azurerm_network_security_group" "web" {
     access                       = "Allow"
     protocol                     = "Tcp"
     source_port_range            = "*"
-    destination_port_range       = "80"
+    destination_port_range       = "3000"
     source_address_prefixes      = azurerm_subnet.Spoke_vnet_subnets["WebSubnet"].address_prefixes
     destination_address_prefixes = azurerm_subnet.Spoke_vnet_subnets["AppSubnet"].address_prefixes
     description                  = "Web to app tier"
@@ -545,7 +530,7 @@ resource "azurerm_network_security_group" "app" {
     access                       = "Allow"
     protocol                     = "Tcp"
     source_port_range            = "*"
-    destination_port_range       = "80"
+    destination_port_range       = "3000"
     source_address_prefixes      = azurerm_subnet.Spoke_vnet_subnets["WebSubnet"].address_prefixes
     destination_address_prefixes = azurerm_subnet.Spoke_vnet_subnets["AppSubnet"].address_prefixes
     description                  = "Only the web tier can reach the app port"

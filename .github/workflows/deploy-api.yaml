@@ -12,12 +12,39 @@ permissions:
   id-token: write
   contents: read
 
+env:
+  NODE_VERSION: '24'
+
 jobs:
-  deploy-api-vmss:
+  # ------------------------------------------------------------------
+  # 1. Run the test suite on every push before anything deploys
+  # ------------------------------------------------------------------
+  test:
+    name: Test
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+  # ------------------------------------------------------------------
+  # 2. App/API tier -> VMSS instances (rolling update via run-command)
+  # ------------------------------------------------------------------
+  deploy-api:
+    name: Deploy API Tier
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Azure login (OIDC)
         uses: azure/login@v2
@@ -26,8 +53,13 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Deploy and Restart API on all VMSS Instances
+      # Pushes latest code to EVERY instance and restarts the Node process.
+      # Requires the repo to be cloned at /opt/unn-sug-api during provisioning
+      # (see cloud-init.yaml). For a private repo set the REPO_URL secret to
+      # https://<github_pat>@github.com/<owner>/<repo>.git
+      - name: Rolling update on all VMSS instances
         run: |
+
           # 1. Fetch all active instance IDs in the VMSS
           INSTANCE_IDS=$(az vmss list-instances \
             --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
@@ -37,28 +69,31 @@ jobs:
           # 2. Loop through each instance and run the deployment script
           for ID in $INSTANCE_IDS; do
           echo "Deploying to VMSS instance: $ID"
-            az vmss run-command invoke \
+            az vmss run-command create \
               --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
-              --name "demo-vmss" \
+              --vmss-name "demo-vmss" \
+              --name unn-sug-deploy \
               --instance-id "$ID" \
-              --command-id RunShellScript \
-              --scripts "
-                mkdir -p /var/www/unn-sug-api && cd /var/www/unn-sug-api
-                # Pull latest api directory from GitHub (or download artifact from Azure Blob)
-                rm -rf repo_tmp && git clone --depth 1 https://github.com/${{ github.repository }}.git repo_tmp
-                cp -r repo_tmp/api/* /var/www/unn-sug-api/
-                rm -rf repo_tmp
+              --script "set -e; \
+                cd /opt/unn-sug-api; \
+                git fetch origin main; \
+                git reset --hard origin/main; \
+                npm ci --omit=dev; \
+                pm2 restart unn-sug-api || pm2 start server.js --name unn-sug-api; \
+                sleep 3; \
+                curl -fsS http://localhost:3000/api/health"
+          
 
-                # Write environment variables
-                cat <<EOF > /var/www/unn-sug-api/.env
-          PORT=3000
-          DB_SERVER=${{ secrets.DB_SERVER }}
-          DB_NAME=${{ secrets.DB_NAME }}
-          EOF
-
-                # Install dependencies & reload zero-downtime via PM2
-                npm install --production
-                pm2 reload unn-sug-api || pm2 start server.js --name unn-sug-api
-                pm2 save
-              "
+        # 3. Check API health via Load Balancer
+      - name: Health check via Load Balancer
+        run: |
+          for i in {1..12}; do
+            if curl -fsS "http://${{ secrets.LB_PUBLIC_IP }}/api/health"; then
+              echo "API tier healthy via LB"
+              exit 0
+            fi
+            echo "Waiting for API tier... ($i/12)"
+            sleep 10
           done
+          echo "API tier failed health check" >&2
+          exit 1

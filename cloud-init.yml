@@ -1,0 +1,26 @@
+#cloud-config
+package_update: true
+packages:
+  - git
+  - curl
+
+runcmd:
+  # --- Node.js 24 ---
+  - curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
+  - apt-get install -y nodejs
+
+  # --- PM2 process manager (survives reboots) ---
+  - npm install -g pm2
+  - pm2 startup systemd -u root --hp /root
+
+  # --- App code ---
+  - mkdir -p /opt/unn-sug-api
+  - git clone https://github.com/Be4rCl4w/sug-app.git /opt/unn-sug-api  # <-- change me
+  - cd /opt/unn-sug-api && npm ci --omit=dev
+
+  # --- App configuration (NOT secrets: auth is via Managed Identity) ---
+  - printf 'DB_SERVER=demosqlserver0978432.database.windows.net\nDB_NAME=demo_sql_database7893\nPORT=3000\n' > /opt/unn-sug-api/.env
+
+  # --- Start under PM2 ---
+  - cd /opt/unn-sug-api && pm2 start server.js --name unn-sug-api
+  - pm2 save
