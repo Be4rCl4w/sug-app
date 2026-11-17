@@ -89,7 +89,7 @@ jobs:
       - name: Health check via Load Balancer
         run: |
           for i in {1..12}; do
-            if curl -fsS "http://${{ secrets.LB_PUBLIC_IP }}/api/health"; then
+            if curl -fsS --max-time 10 "http://${{ secrets.LB_PUBLIC_IP }}/api/health"; then
               echo "API tier healthy via LB"
               exit 0
             fi
