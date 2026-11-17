@@ -257,6 +257,12 @@ resource "azurerm_linux_virtual_machine_scale_set" "vmss" {
     username   = "adminuser"
     public_key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQCtkjuZrrWpBLFtvglHrFk9JJv1sjufeDPSVqIzWHAJfrzMottNf6xaSBU1vVBTNjceLAt2Xe8utrsFUyLw9uJkT6IPhdUt66EOQjZTUPqemQ96UDSjLhmCzSeFG5off/pweLWX1KKafutPnkQHVHdg4bxuqDTtC8cOeXs7vAn/gMp18rUpQ+IMpSo81rneBRt/nisowmI5u9AMQx3U7qdw2rxe3lp19tJcHUPauTtS8mXGISfcIpYO1zUQjag+mwP4aGJZx0MBU0e7HXxF5mc1rmtin4iEHgqXuWhj5uHFOlxiqA9TuBheTHfU1kYr2obaSF+6G/tJsconRuIDC7r524/AeoUWbZYPNN8ckQoaxn2tZ98SY91k/DzF42N78N5nlf5iNXZsJWmwoMTwDmR2fxLAmTaQvyHWwfW+5jaJBez7plsmAzfhAsYNaxPtVfHZd6V/HHYheLGfjyxBB/x+vc1Bk1zxMKmuIRdLxIJX7lUaGtZsQhFWhFxswHARPs3RcU0cFcmqbjQZXukIzjmnFwRHdYHhzVDkD9HYeHtbRBQc3X22YmQwRx/m4ao7sGc5MNV+zVguOXiIifopamYbC3OPZGMjNohZGoc7LdxcVU/K3w+WIFwTRwC2ZNN1RzklMUwcG49iGy7EJutCnAN0GOKwwr4SYViPMGW/UiuFlQ== emerie@Maverick"
   }
+  rolling_upgrade_policy {
+    max_batch_instance_percent              = 20
+    max_unhealthy_instance_percent          = 20
+    max_unhealthy_upgraded_instance_percent = 5
+    pause_time_between_batches              = "PT1M"
+  }
 
   identity {
     type = "SystemAssigned"
