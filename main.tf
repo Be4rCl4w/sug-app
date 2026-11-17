@@ -156,14 +156,14 @@ resource "azurerm_linux_web_app" "webapp" {
     minimum_tls_version               = "1.2"
     ftps_state                        = "Disabled"
     http2_enabled                     = true
-    health_check_path                 = "/health"
+    health_check_path                 = "/"
     health_check_eviction_time_in_min = 5
 
     application_stack {
       node_version = "24-lts"
     }
     # Serve plain HTML files from /home/site/wwwroot on port 8080
-    app_command_line = "sh -c \"echo \\\"window.API_BASE_URL='$API_BASE_URL';\\\" > /home/site/wwwroot/config.js && pm2 serve /home/site/wwwroot --no-daemon --spa\""
+    app_command_line = "sh -c \"echo \\\"window.API_BASE_URL='$API_BASE_URL';\\\" > /home/site/wwwroot/config.js && pm2 serve /home/site/wwwroot --no-daemon\""
   }
 
   https_only                                     = false
@@ -227,8 +227,8 @@ resource "azurerm_lb_probe" "http" {
   protocol            = "Http"
   port                = 3000
   request_path        = "/api/health"
-  interval_in_seconds = 5
-  number_of_probes    = 2
+  interval_in_seconds = 10
+  number_of_probes    = 3
 }
 
 resource "azurerm_lb_rule" "http" {
@@ -250,6 +250,7 @@ resource "azurerm_linux_virtual_machine_scale_set" "vmss" {
   sku                 = "Standard_B2s"
   instances           = 1
   admin_username      = "adminuser"
+  upgrade_mode        = "Rolling"
   health_probe_id     = azurerm_lb_probe.http.id
 
   admin_ssh_key {
