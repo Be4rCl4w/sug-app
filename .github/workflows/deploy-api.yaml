@@ -22,6 +22,9 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api   # <-- Runs npm commands inside /api
     steps:
       - uses: actions/checkout@v4
 
@@ -55,12 +58,8 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       # Pushes latest code to EVERY instance and restarts the Node process.
-      # Requires the repo to be cloned at /opt/unn-sug-api during provisioning
-      # (see cloud-init.yaml). For a private repo set the REPO_URL secret to
-      # https://<github_pat>@github.com/<owner>/<repo>.git
       - name: Rolling update on all VMSS instances
         run: |
-
           # 1. Fetch all active instance IDs in the VMSS
           INSTANCE_IDS=$(az vmss list-instances \
             --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
@@ -69,7 +68,7 @@ jobs:
          
           # 2. Loop through each instance and run the deployment script
           for ID in $INSTANCE_IDS; do
-          echo "Deploying to VMSS instance: $ID"
+            echo "Deploying to VMSS instance: $ID"
             az vmss run-command create \
               --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
               --vmss-name "demo-vmss" \
@@ -79,13 +78,14 @@ jobs:
                 cd /opt/unn-sug-api; \
                 git fetch origin main; \
                 git reset --hard origin/main; \
+                cd /opt/unn-sug-api/api; \
                 npm ci --omit=dev; \
                 pm2 restart unn-sug-api || pm2 start server.js --name unn-sug-api; \
                 sleep 3; \
                 curl -fsS http://localhost:3000/api/health"
-          
+          done   # <-- Added missing 'done' to close the loop
 
-        # 3. Check API health via Load Balancer
+      # 3. Check API health via Load Balancer
       - name: Health check via Load Balancer
         run: |
           for i in {1..12}; do
