@@ -211,7 +211,7 @@ resource "azurerm_lb" "lb" {
   sku                 = "Standard"
 
   frontend_ip_configuration {
-    name                          = "private-frontend"
+    name                          = "publicIPfrontend"
     public_ip_address_id          = azurerm_public_ip.lb_public_ip.id
   }
 }
@@ -237,7 +237,7 @@ resource "azurerm_lb_rule" "http" {
   protocol                       = "Tcp"
   frontend_port                  = 80
   backend_port                   = 3000
-  frontend_ip_configuration_name = "private-frontend"
+  frontend_ip_configuration_name = "publicIPfrontend"
   backend_address_pool_ids       = [azurerm_lb_backend_address_pool.pool.id]
   probe_id                       = azurerm_lb_probe.http.id
 }
@@ -337,11 +337,6 @@ resource "azurerm_monitor_autoscale_setting" "vmss_autoscale" {
         operator           = "GreaterThan"
         threshold          = 75
         metric_namespace   = "microsoft.compute/virtualmachinescalesets"
-        dimensions {
-          name     = "AppName"
-          operator = "Equals"
-          values   = ["App1"]
-        }
       }
 
       scale_action {
@@ -489,7 +484,7 @@ resource "azurerm_network_security_group" "web" {
     access                       = "Allow"
     protocol                     = "Tcp"
     source_port_range            = "*"
-    destination_port_range       = "3000"
+    destination_port_ranges       = ["3000", "80", "8080"]
     source_address_prefixes      = azurerm_subnet.Spoke_vnet_subnets["WebSubnet"].address_prefixes
     destination_address_prefixes = azurerm_subnet.Spoke_vnet_subnets["AppSubnet"].address_prefixes
     description                  = "Web to app tier"
@@ -524,7 +519,7 @@ resource "azurerm_network_security_group" "app" {
     access                     = "Allow"
     protocol                   = "Tcp"
     source_port_range          = "*"
-    destination_port_range     = "3000"
+    destination_port_ranges     = ["3000", "80", "8080"]
     source_address_prefix      = "Internet"
     destination_address_prefixes = azurerm_subnet.Spoke_vnet_subnets["AppSubnet"].address_prefixes
   }
@@ -536,7 +531,7 @@ resource "azurerm_network_security_group" "app" {
     access                       = "Allow"
     protocol                     = "Tcp"
     source_port_range            = "*"
-    destination_port_range       = "3000"
+    destination_port_ranges       = ["3000", "80", "8080"]
     source_address_prefixes      = azurerm_subnet.Spoke_vnet_subnets["WebSubnet"].address_prefixes
     destination_address_prefixes = azurerm_subnet.Spoke_vnet_subnets["AppSubnet"].address_prefixes
     description                  = "Only the web tier can reach the app port"
@@ -544,7 +539,7 @@ resource "azurerm_network_security_group" "app" {
 
   security_rule {
     name                         = "app-in-admin-bastion"
-    priority                     = 300
+    priority                     = 400
     direction                    = "Inbound"
     access                       = "Allow"
     protocol                     = "Tcp"
@@ -557,7 +552,7 @@ resource "azurerm_network_security_group" "app" {
 
   security_rule {
     name                       = "Allow-LB-Probes"
-    priority                   = 400
+    priority                   = 300
     direction                  = "Inbound"
     access                     = "Allow"
     protocol                   = "*"
@@ -589,7 +584,7 @@ resource "azurerm_network_security_group" "app" {
     source_port_range            = "*"
     destination_port_range       = "1433"
     source_address_prefixes      = azurerm_subnet.Spoke_vnet_subnets["AppSubnet"].address_prefixes
-    destination_address_prefixes = azurerm_subnet.Spoke_vnet_subnets["DataSubnet"].address_prefixes
+    destination_address_prefixes = azurerm_subnet.Spoke_vnet_subnets["PrivateEndpointSubnet"].address_prefixes
     description                  = "App to database on DB port only"
   }
 
@@ -637,7 +632,7 @@ resource "azurerm_network_security_group" "db" {
     source_port_range            = "*"
     destination_port_range       = "1433"
     source_address_prefixes      = azurerm_subnet.Spoke_vnet_subnets["AppSubnet"].address_prefixes
-    destination_address_prefixes = azurerm_subnet.Spoke_vnet_subnets["DataSubnet"].address_prefixes
+    destination_address_prefixes = azurerm_subnet.Spoke_vnet_subnets["PrivateEndpointSubnet"].address_prefixes
     description                  = "Only the app tier can reach the DB port"
   }
 
@@ -682,7 +677,7 @@ resource "azurerm_subnet_network_security_group_association" "app" {
 }
 
 resource "azurerm_subnet_network_security_group_association" "db" {
-  subnet_id                 = azurerm_subnet.Spoke_vnet_subnets["DataSubnet"].id
+  subnet_id                 = azurerm_subnet.Spoke_vnet_subnets["PrivateEndpointSubnet"].id
   network_security_group_id = azurerm_network_security_group.db.id
 }
 
@@ -714,4 +709,34 @@ resource "azurerm_nat_gateway_public_ip_association" "nat_ip_assoc" {
 resource "azurerm_subnet_nat_gateway_association" "subnet_nat_ass" {
   subnet_id      = azurerm_subnet.Spoke_vnet_subnets["AppSubnet"].id
   nat_gateway_id = azurerm_nat_gateway.nat_gateway.id
+}
+
+resource "azurerm_private_dns_zone" "sql" {
+  name                = "privatelink.database.windows.net"
+  resource_group_name = azurerm_resource_group.rg.name
+}
+
+resource "azurerm_private_dns_zone_virtual_network_link" "spoke" {
+  name                  = "spoke-link"
+  private_dns_zone_id = azurerm_private_dns_zone.sql.id
+  virtual_network_id    = azurerm_virtual_network.Spoke_vnet.id
+}
+
+resource "azurerm_private_endpoint" "sql" {
+  name                = "sql-private-endpoint"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  subnet_id           = azurerm_subnet.Spoke_vnet_subnets["PrivateEndpointSubnet"].id
+
+  private_service_connection {
+    name                           = "sql-psc"
+    private_connection_resource_id = azurerm_mssql_server.sql_server.id
+    subresource_names              = ["sqlServer"]
+    is_manual_connection           = false
+  }
+
+  private_dns_zone_group {
+    name                 = "sql-dns"
+    private_dns_zone_ids = [azurerm_private_dns_zone.sql.id]
+  }
 }
