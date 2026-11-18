@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: api   # <-- Runs npm commands inside /api
+        working-directory: api
     steps:
       - uses: actions/checkout@v4
 
@@ -57,16 +57,17 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # Pushes latest code to EVERY instance and restarts the Node process.
+      # Pushes latest code, writes .env, and restarts the Node process on EVERY instance
       - name: Rolling update on all VMSS instances
+        env:
+          DB_SERVER: ${{ secrets.DB_SERVER }}
+          DB_NAME: ${{ secrets.DB_NAME }}
         run: |
-          # 1. Fetch all active instance IDs in the VMSS
           INSTANCE_IDS=$(az vmss list-instances \
             --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
             --name "demo-vmss" \
             --query "[].instanceId" -o tsv)
          
-          # 2. Loop through each instance and run the deployment script
           for ID in $INSTANCE_IDS; do
             echo "Deploying to VMSS instance: $ID"
             az vmss run-command create \
@@ -79,18 +80,24 @@ jobs:
                 git fetch origin main; \
                 git reset --hard origin/main; \
                 cd /opt/unn-sug-api/api; \
+                printf 'PORT=3000\nDB_SERVER=%s\nDB_NAME=%s\n' '${{ secrets.DB_SERVER }}' '${{ secrets.DB_NAME }}' > .env; \
                 npm ci --omit=dev; \
-                pm2 restart unn-sug-api || pm2 start server.js --name unn-sug-api; \
+                pm2 restart unn-sug-api --update-env || pm2 start server.js --name unn-sug-api; \
+                pm2 save; \
                 sleep 3; \
-                curl -fsS http://localhost:3000/api/health"
-          done   # <-- Added missing 'done' to close the loop
+                curl -fsS --noproxy '*' http://127.0.0.1:3000/api/health"
+          done
 
-      # 3. Check API health via Load Balancer
-      - name: Health check via Load Balancer
+      # 3. Simple inline query to fetch Load Balancer IP and check health
+      - name: Health check via Load Balancer IP
         run: |
+          LB_IP=$(az network lb list -g "${{ secrets.AZURE_RESOURCE_GROUP }}" --query "[0].frontendIpConfigurations[0].publicIpAddress.id" -o tsv | xargs -r -I {} az network public-ip show --ids {} --query ipAddress -o tsv)
+          
+          echo "Resolved LB IP: $LB_IP. Starting health checks..."
+
           for i in {1..12}; do
-            if curl -fsS --max-time 10 "http://${{ secrets.LB_PUBLIC_IP }}/api/health"; then
-              echo "API tier healthy via LB"
+            if curl -fsS --max-time 10 "http://$LB_IP/api/health"; then
+              echo "API tier healthy via LB ($LB_IP)"
               exit 0
             fi
             echo "Waiting for API tier... ($i/12)"
