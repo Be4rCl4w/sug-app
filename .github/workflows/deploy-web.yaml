@@ -78,12 +78,36 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       
+      - name: Get Runner Public IP
+        id: ip
+        run: echo "ipv4=$(curl -s https://ipify.org)" >> $GITHUB_OUTPUT
+
+      - name: Allow Runner IP on App Service SCM
+        run: |
+          az webapp config access-restriction add \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --name "miWebapp65748" \
+            --scm-site true \
+            --rule-name "github-actions-temp" \
+            --action Allow \
+            --ip-address "${{ steps.ip.outputs.ipv4 }}/32" \
+            --priority 100
+
       - name: Deploy to App Service
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
           package: './dist'
 
+      - name: Remove Temporary SCM IP Rule
+        if: always()
+        run: |
+          az webapp config access-restriction remove \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --name "miWebapp65748" \
+            --scm-site true \
+            --rule-name "github-actions-temp"
+            
       # Layer 2: the full public path through App Gateway + WAF
       - name: Smoke test via App Gateway
         env:
