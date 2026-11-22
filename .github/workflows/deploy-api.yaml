@@ -78,7 +78,7 @@ jobs:
               --name "demo-vmss" \
               --instance-id "$ID" \
               --command-id RunShellScript \
-              --query "value.message" -o tsv \
+              --query "value[0].message" -o tsv \
               --scripts "set -e
                 cd /opt/unn-sug-api
                 git fetch origin ${{ github.sha }}
