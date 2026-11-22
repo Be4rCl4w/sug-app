@@ -130,8 +130,8 @@ locals {
 resource "azurerm_subnet" "Spoke_vnet_subnets" {
   for_each             = local.Spoke_subnets
   name                 = each.key
-  resource_group_name  = data.azurerm_resource_group.rg.name
-  virtual_network_name = data.azurerm_virtual_network.Spoke_vnet.name
+  resource_group_name  = azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.Spoke_vnet.name
   address_prefixes     = [each.value.address_prefix]
 
   private_endpoint_network_policies = each.value.pe_policies
@@ -154,8 +154,8 @@ resource "azurerm_subnet" "Spoke_vnet_subnets" {
 resource "azurerm_subnet" "Hub_vnet_subnets" {
   for_each             = local.Hub_subnets
   name                 = each.key
-  resource_group_name  = data.azurerm_resource_group.rg.name
-  virtual_network_name = data.azurerm_virtual_network.Hub_vnet.name
+  resource_group_name  = azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.Hub_vnet.name
   address_prefixes     = [each.value]
 }
 
@@ -170,8 +170,8 @@ resource "azuread_application_federated_identity_credential" "github_branch" {
 
 locals {
   vnets = {
-    hub   = data.azurerm_virtual_network.Hub_vnet.id
-    spoke = data.azurerm_virtual_network.Spoke_vnet.id
+    hub   = azurerm_virtual_network.Hub_vnet.id
+    spoke = azurerm_virtual_network.Spoke_vnet.id
   }
 
   dns_zones = {
@@ -203,7 +203,7 @@ locals {
 resource "azurerm_private_dns_zone" "private_dns_zone" {
   for_each            = local.dns_zones
   name                = each.value.name
-  resource_group_name = data.azurerm_resource_group.rg.name
+  resource_group_name = azurerm_resource_group.rg.name
 }
 
 resource "azurerm_private_dns_zone_virtual_network_link" "private_dns_link" {
@@ -239,8 +239,8 @@ locals {
 resource "azurerm_private_endpoint" "private_endpoint" {
   for_each            = local.endpoints_config
   name                = "${each.key}-private-endpoint"
-  location            = data.azurerm_resource_group.rg.location
-  resource_group_name = data.azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
   subnet_id           = each.value.subnet_id
 
   private_service_connection {
@@ -258,8 +258,8 @@ resource "azurerm_private_endpoint" "private_endpoint" {
 
 resource "azurerm_service_plan" "demo_plan" {
   name                = "My-demo-plan"
-  resource_group_name = data.azurerm_resource_group.rg.name
-  location            = data.azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
   os_type             = "Linux"
   sku_name            = "P0v3"
 }
