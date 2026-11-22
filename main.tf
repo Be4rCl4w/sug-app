@@ -223,7 +223,7 @@ locals {
     }
     kv = {
       dns_key     = "kv"
-      resource_id = data.azurerm_key_vault.kv.id
+      resource_id = azurerm_key_vault.kv.id
       subresource = "vault"
       subnet_id   = azurerm_subnet.Spoke_vnet_subnets["WebEndpointSubnet"].id
     }
@@ -266,8 +266,8 @@ resource "azurerm_service_plan" "demo_plan" {
 
 resource "azurerm_linux_web_app" "webapp" {
   name                = "miWebapp65748"
-  resource_group_name = data.azurerm_resource_group.rg.name
-  location            = data.azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
   service_plan_id     = azurerm_service_plan.demo_plan.id
 
   site_config {
@@ -314,12 +314,15 @@ resource "azurerm_linux_web_app" "webapp" {
       }
     }
   }
+  depends_on = [
+    azurerm_subnet.Spoke_vnet_subnets
+  ]
 }
 
 resource "azurerm_lb" "lb" {
   name                = "my-lb"
-  location            = data.azurerm_resource_group.rg.location
-  resource_group_name = data.azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
   sku                 = "Standard"
 
   frontend_ip_configuration {
@@ -561,8 +564,8 @@ resource "azurerm_mssql_database_extended_auditing_policy" "demo" {
 ############################################
 resource "azurerm_network_security_group" "appgw" {
   name                = "Demo-appGW-nsg"
-  location            = data.azurerm_resource_group.rg.location
-  resource_group_name = data.azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
 
   security_rule {
     name                       = "appGW-in-https"
@@ -623,7 +626,7 @@ resource "azurerm_network_security_group" "appgw" {
     access                       = "Allow"
     protocol                     = "Tcp"
     source_port_range            = "*"
-    destination_port_range       = ["80", "443"]
+    destination_port_ranges      = ["80", "443"]
     source_address_prefixes      = azurerm_subnet.Hub_vnet_subnets["AppGatewaySubnet"].address_prefixes
     destination_address_prefixes = azurerm_subnet.Spoke_vnet_subnets["WebEndpointSubnet"].address_prefixes
     description                  = "App Gateway to web tier on port 80"
@@ -676,8 +679,8 @@ resource "azurerm_network_security_group" "appgw" {
 ############################################
 resource "azurerm_network_security_group" "web" {
   name                = "Demo-web-nsg"
-  location            = data.azurerm_resource_group.rg.location
-  resource_group_name = data.azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
 
  security_rule {
     name                         = "PE-in-from-github"
@@ -686,8 +689,8 @@ resource "azurerm_network_security_group" "web" {
     access                       = "Allow"
     protocol                     = "Tcp"
     source_port_range            = "*"
-    destination_port_range       = ["80", "443"]
-    source_address_prefixes      = "Internet"
+    destination_port_ranges      = ["80", "443"]
+    source_address_prefix        = "Internet"
     destination_address_prefixes = azurerm_subnet.Spoke_vnet_subnets["WebSubnet"].address_prefixes
     description                  = "Github to web app (HTTPS)"
   }
@@ -738,8 +741,8 @@ resource "azurerm_network_security_group" "web" {
 ############################################
 resource "azurerm_network_security_group" "app" {
   name                = "Demo-app-nsg"
-  location            = data.azurerm_resource_group.rg.location
-  resource_group_name = data.azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
 
   security_rule {
     name                         = "app-in-from-web"
@@ -774,8 +777,8 @@ resource "azurerm_network_security_group" "app" {
     access                       = "Allow"
     protocol                     = "Tcp"
     source_port_range            = "*"
-    destination_port_range       = ["80", "443"]
-    source_address_prefixes      = "Internet"
+    destination_port_ranges      = ["80", "443"]
+    source_address_prefix        = "Internet"
     destination_address_prefixes = azurerm_subnet.Spoke_vnet_subnets["AppSubnet"].address_prefixes
     description                  = "Github to app app (HTTPS)"
   }
@@ -838,8 +841,8 @@ resource "azurerm_network_security_group" "app" {
 ############################################
 resource "azurerm_network_security_group" "db" {
   name                = "Demo-db-nsg"
-  location            = data.azurerm_resource_group.rg.location
-  resource_group_name = data.azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
 
   security_rule {
     name                         = "db-in-from-app"
@@ -886,8 +889,8 @@ resource "azurerm_network_security_group" "db" {
 ############################################
 resource "azurerm_network_security_group" "web-pe" {
   name                = "Demo-Web-PE-nsg"
-  location            = data.azurerm_resource_group.rg.location
-  resource_group_name = data.azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
 
   security_rule {
     name                         = "PE-in-from-appGW"
@@ -909,8 +912,8 @@ resource "azurerm_network_security_group" "web-pe" {
     access                       = "Allow"
     protocol                     = "Tcp"
     source_port_range            = "*"
-    destination_port_range       = ["80", "443"]
-    source_address_prefixes      = "Internet"
+    destination_port_ranges      = ["80", "443"]
+    source_address_prefix        = "Internet"
     destination_address_prefixes = azurerm_subnet.Spoke_vnet_subnets["WebEndpointSubnet"].address_prefixes
     description                  = "Github to web app endpoints (HTTPS)"
   }
@@ -1141,7 +1144,7 @@ resource "azurerm_application_gateway" "appgw" {
 
   firewall_policy_id = azurerm_web_application_firewall_policy.waf_policy.id
 
-  depends_on = [azurerm_role_assignment.appgw_kv_reader]
+  depends_on = [azurerm_role_assignment.gh_kv_cert_reader]
 }
 
 resource "azurerm_web_application_firewall_policy" "waf_policy" {

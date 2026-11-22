@@ -1,7 +1,8 @@
 .terraform/
 terraform.tfstate
 terraform.tfstate.backup
-*terraform.lock.hcl
+.terraform.lock.*
 .terraform.lock.hcl
 djdjdj.yml
 node_modules/
+.terraform.*
