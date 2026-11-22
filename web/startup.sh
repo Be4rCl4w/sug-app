@@ -1,4 +1,5 @@
 #!/bin/sh
-# Writes runtime config for the page, then serves the static files
-printf 'window.API_BASE_URL = "%s";\n' "$API_BASE_URL" > /home/site/wwwroot/config.js
-exec pm2 serve /home/site/wwwroot --no-daemon
+# Start the web tier: serves static files from ./public and proxies /api to the internal LB
+cd /home/site/wwwroot || exit 1
+export PORT="${PORT:-8080}"
+exec node server.js

@@ -1,51 +1,58 @@
 require('dotenv').config();
 const express = require('express');
-const cors = require('cors');
 const sql = require('mssql');
-const { DefaultAzureCredential } = require('@azure/identity');
 
 const app = express();
 app.use(express.json());
-app.use(cors());
+
 
 const port = process.env.PORT || 3000;
 
-// --- Cached DB pool (acquired once, reused across requests) ---
+// --- Cached DB pool (created once, reused across requests) ---
+// Entra tokens are fetched by the driver for every NEW connection,
+// so the pool never holds a stale token.
 let poolPromise = null;
 
 function getDbPool() {
     if (!poolPromise) {
-        poolPromise = (async () => {
-            const credential = new DefaultAzureCredential();
-            const tokenResponse = await credential.getToken("https://database.windows.net/.default");
+        const authOptions = {};
+        // Only needed for a user-assigned identity; leave AZURE_CLIENT_ID unset
+        // when using the VMSS system-assigned identity.
+        if (process.env.AZURE_CLIENT_ID) {
+            authOptions.clientId = process.env.AZURE_CLIENT_ID;
+        }
 
-            const config = {
-                server: process.env.DB_SERVER, // e.g., 'your-sql-server.database.windows.net'
-                database: process.env.DB_NAME, // e.g., 'sug_db'
-                options: {
-                    encrypt: true,
-                    trustServerCertificate: false
-                },
-                authentication: {
-                    type: 'azure-active-directory-access-token',
-                    options: {
-                        token: tokenResponse.token
-                    }
-                },
-                pool: {
-                    max: 10,
-                    min: 0,
-                    idleTimeoutMillis: 30000
-                }
-            };
+        const config = {
+            server: process.env.DB_SERVER, // e.g., 'your-sql-server.database.windows.net'
+            database: process.env.DB_NAME, // e.g., 'sug_db'
+            options: {
+                encrypt: true,
+                trustServerCertificate: false
+            },
+            authentication: {
+                type: 'azure-active-directory-default',
+                options: authOptions
+            },
+            pool: {
+                max: 10,
+                min: 0,
+                idleTimeoutMillis: 30000
+            }
+        };
 
-            const pool = await sql.connect(config);
-            pool.on('error', (err) => {
-                console.error('DB pool error:', err);
-                poolPromise = null; // force reconnect on next request
-            });
-            return pool;
-        })();
+        const pool = new sql.ConnectionPool(config);
+
+        pool.on('error', (err) => {
+            console.error('DB pool error:', err);
+            poolPromise = null; // force a fresh pool on next request
+            pool.close().catch(() => {});
+        });
+
+        poolPromise = pool.connect().catch((err) => {
+            // Don't cache a failed connection attempt forever
+            poolPromise = null;
+            throw err;
+        });
     }
     return poolPromise;
 }
@@ -106,7 +113,7 @@ app.post('/api/vote', async (req, res) => {
             return res.status(400).json({ error: 'Invalid candidate selected.' });
         }
 
-        // Transaction: Record vote and increment counter atomically.
+        // Transaction: record vote and increment counter atomically.
         // NOTE: duplicate votes must ALSO be blocked at the schema level with:
         //   ALTER TABLE VotesLog ADD CONSTRAINT UQ_VoterIdentifier UNIQUE (VoterIdentifier);
         const transaction = new sql.Transaction(pool);

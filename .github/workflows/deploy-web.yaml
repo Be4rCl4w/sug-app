@@ -12,19 +12,20 @@ permissions:
   contents: read
   id-token: write
 
+concurrency:
+  group: deploy-web
+  cancel-in-progress: false
+
 env:
   NODE_VERSION: '24'
 
 jobs:
-  # ------------------------------------------------------------------
-  # 1. Run the test suite on every push before anything deploys
-  # ------------------------------------------------------------------
   test:
     name: Test
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: api   # <-- Runs npm commands inside /api
+        working-directory: web
     steps:
       - uses: actions/checkout@v4
 
@@ -32,7 +33,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: 'api/package-lock.json'
+          cache-dependency-path: 'web/package-lock.json'
 
       - name: Install dependencies
         run: npm ci
@@ -40,16 +41,34 @@ jobs:
       - name: Run tests
         run: npm test
 
-
   # ------------------------------------------------------------------
-  # 2. Web tier -> Azure App Service (static index.html)
+  # 2. Web tier (proxy server + index.html) -> App Service, via the private endpoint
   # ------------------------------------------------------------------
   deploy-web:
     name: Deploy Web Tier
     needs: test
     runs-on: ubuntu-latest
+    env:
+      RG: ${{ secrets.AZURE_RESOURCE_GROUP }}
+      APP: ${{ secrets.AZURE_WEBAPP_NAME }}
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: 'web/package-lock.json'
+
+      # SCM_DO_BUILD_DURING_DEPLOYMENT is "false", so ship node_modules in the package.
+      # A clean dist/ keeps tests and dev dependencies out of production.
+      - name: Build deployment package
+        run: |
+          rm -rf dist && mkdir dist
+          cp web/server.js web/package.json web/package-lock.json web/startup.sh web/index.html dist/
+          sed -i 's/\r$//' dist/startup.sh     # guard against CRLF breaking the sh script
+          cd dist
+          npm ci --omit=dev
 
       - name: Azure login (OIDC)
         uses: azure/login@v2
@@ -58,13 +77,30 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      
       - name: Deploy to App Service
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
-          package: './web'
+          package: './dist'
 
-      - name: Smoke test web tier
+      # Layer 2: the full public path through App Gateway + WAF
+      - name: Smoke test via App Gateway
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
         run: |
-          sleep 15  # allow app to restart and come up
-          curl -fsSL "http://${{ secrets.AZURE_WEBAPP_NAME }}.azurewebsites.net/" | grep -q "UNN SUG"
+          for i in {1..12}; do
+            if curl -fsSk  --max-time 10 "$APP_URL/" | grep -q "UNN SUG" \
+               && curl -fsSk  --max-time 10 "$APP_URL/api/health" | grep -q '"Healthy"'; then
+              echo "OK: $APP_URL works end-to-end."
+              exit 0
+            fi
+            echo "Waiting for App Gateway path... ($i/12)"
+            sleep 10
+          done
+          echo "CRITICAL: $APP_URL failed the end-to-end smoke test!" >&2
+          exit 1
+
+      - name: Clean up build output
+        if: always()
+        run: rm -rf dist

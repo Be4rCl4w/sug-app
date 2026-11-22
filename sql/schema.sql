@@ -19,3 +19,11 @@ CREATE TABLE VotesLog (
     CandidateId INT FOREIGN KEY REFERENCES Candidates(Id),
     VotedAt DATETIME DEFAULT GETDATE()
 );
+
+-- Race-safe duplicate prevention (required by the API)
+ALTER TABLE VotesLog ADD CONSTRAINT UQ_VoterIdentifier UNIQUE (VoterIdentifier);
+
+-- Give the VMSS Managed Identity DB access
+CREATE USER [demo-vmss] FROM EXTERNAL PROVIDER;
+ALTER ROLE db_datareader ADD MEMBER [demo-vmss];
+ALTER ROLE db_datawriter ADD MEMBER [demo-vmss];

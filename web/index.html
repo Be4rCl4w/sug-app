@@ -58,15 +58,12 @@
         </section>
     </main>
 
-    <script src="config.js"></script>
     <script>
-        // Point this to your API endpoint. Options:
-        //  1) If the Load Balancer routes /api to the app tier: use '/api'
-        //  2) Otherwise replace the placeholder with your VMSS LB DNS/IP.
-        // IMPORTANT: use https:// in production - browsers block http:// API calls from https pages.
+        // The web tier proxies /api to the internal API tier, so a relative path is all we need.
+        // localhost branch is for local development against server.js on port 3000.
         const API_BASE_URL = window.location.hostname === 'localhost'
             ? 'http://localhost:3000/api'
-            : (window.API_BASE_URL || '/api');
+            : '/api';
 
         // Escape user/DB-controlled values before injecting into innerHTML (prevents stored XSS)
         function escapeHtml(value) {

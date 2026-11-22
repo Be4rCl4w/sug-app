@@ -12,13 +12,14 @@ permissions:
   id-token: write
   contents: read
 
+concurrency:
+  group: deploy-api
+  cancel-in-progress: false
+
 env:
   NODE_VERSION: '24'
 
 jobs:
-  # ------------------------------------------------------------------
-  # 1. Run the test suite on every push before anything deploys
-  # ------------------------------------------------------------------
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -48,8 +49,6 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
       - name: Azure login (OIDC)
         uses: azure/login@v2
         with:
@@ -57,51 +56,57 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # Pushes latest code, writes .env, and restarts the Node process on EVERY instance
+      # run-command goes through the Azure control plane, so the VMSS needs no inbound
+      # access from the runner. Each instance pulls the code, writes .env, restarts Node,
+      # and checks its own /api/health before the loop moves to the next instance.
       - name: Rolling update on all VMSS instances
         env:
+          RG: ${{ secrets.AZURE_RESOURCE_GROUP }}
           DB_SERVER: ${{ secrets.DB_SERVER }}
           DB_NAME: ${{ secrets.DB_NAME }}
         run: |
           INSTANCE_IDS=$(az vmss list-instances \
-            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --resource-group "$RG" \
             --name "demo-vmss" \
             --query "[].instanceId" -o tsv)
-         
+
           for ID in $INSTANCE_IDS; do
             echo "Deploying to VMSS instance: $ID"
             az vmss run-command create \
-              --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+              --resource-group "$RG" \
               --vmss-name "demo-vmss" \
               --name unn-sug-deploy \
+              --treat-failure-as-deployment-failure true \
               --instance-id "$ID" \
               --script "set -e; \
                 cd /opt/unn-sug-api; \
-                git fetch origin main; \
-                git reset --hard origin/main; \
+                git fetch origin ${{ github.sha }}; \
+                git reset --hard ${{ github.sha }}; \
                 cd /opt/unn-sug-api/api; \
-                printf 'PORT=3000\nDB_SERVER=%s\nDB_NAME=%s\n' '${{ secrets.DB_SERVER }}' '${{ secrets.DB_NAME }}' > .env; \
+                printf 'PORT=3000\nDB_SERVER=%s\nDB_NAME=%s\n' '$DB_SERVER' '$DB_NAME' > .env; \
                 npm ci --omit=dev; \
                 pm2 restart unn-sug-api --update-env || pm2 start server.js --name unn-sug-api; \
                 pm2 save; \
                 sleep 3; \
                 curl -fsS --noproxy '*' http://127.0.0.1:3000/api/health"
-          done
+          done  
 
-      # 3. Simple inline query to fetch Load Balancer IP and check health
-      - name: Health check via Load Balancer IP
+      # Don't call the internal LB from the runner: the app NSG only lets the web tier
+      # reach port 3000 (by design). Test the real user path instead:
+      # App Gateway -> web tier -> proxy -> internal LB -> VMSS.
+      - name: End-to-end health check via App Gateway
+        env:
+          APP_URL: ${{ secrets.APP_URL }}   
         run: |
-          LB_IP=$(az network lb list -g "${{ secrets.AZURE_RESOURCE_GROUP }}" --query "[0].frontendIpConfigurations[0].publicIpAddress.id" -o tsv | xargs -r -I {} az network public-ip show --ids {} --query ipAddress -o tsv)
-          
-          echo "Resolved LB IP: $LB_IP. Starting health checks..."
-
           for i in {1..12}; do
-            if curl -fsS --max-time 10 "http://$LB_IP/api/health"; then
-              echo "API tier healthy via LB ($LB_IP)"
+            if curl -fsSk  --max-time 10 "$APP_URL/api/health" | grep -q '"Healthy"'; then
+              echo "API tier healthy end-to-end via $APP_URL"
               exit 0
             fi
             echo "Waiting for API tier... ($i/12)"
             sleep 10
           done
-          echo "API tier failed health check" >&2
+
+          echo "API tier failed the end-to-end health check. Verbose output:" >&2
+          curl -vk  --max-time 10 "$APP_URL/api/health" || true
           exit 1
