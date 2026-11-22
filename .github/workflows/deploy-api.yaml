@@ -89,7 +89,6 @@ jobs:
                 pm2 restart unn-sug-api --update-env || pm2 start server.js --name unn-sug-api
                 pm2 save
                 sleep 3
-                curl -fsS http://127.0.0.1:3000/
                 echo 'DEPLOY_SUCCESS'")
 
             echo "$MESSAGE"
