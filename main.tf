@@ -100,13 +100,6 @@ locals {
 }
 
 locals {
-  Hub_subnets = {
-    "AzureBastionSubnet"  = "10.0.1.0/27"
-    "AppGatewaySubnet"    = "10.0.2.0/26"
-  }
-}
-
-locals {
   Spoke_subnets = {
     "WebSubnet" = {
       address_prefix = "10.20.0.0/24"
